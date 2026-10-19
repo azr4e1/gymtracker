@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dev build gets a grey icon so it can't be confused with the real app. -->
+<resources>
+    <color name="ic_launcher_background">#5F6B78</color>
+</resources>

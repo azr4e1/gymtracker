@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground (108dp canvas, content kept inside the central 66dp safe zone):
+     a dumbbell, tilted slightly. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-30">
+        <!-- Bar -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M30,51.5h48v5h-48z" />
+        <!-- Inner plates -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M36,36h8a2,2 0 0 1 2,2v32a2,2 0 0 1 -2,2h-8a2,2 0 0 1 -2,-2v-32a2,2 0 0 1 2,-2z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M64,36h8a2,2 0 0 1 2,2v32a2,2 0 0 1 -2,2h-8a2,2 0 0 1 -2,-2v-32a2,2 0 0 1 2,-2z" />
+        <!-- Outer plates -->
+        <path
+            android:fillColor="#B3FFFFFF"
+            android:pathData="M27,42h5a2,2 0 0 1 2,2v20a2,2 0 0 1 -2,2h-5a2,2 0 0 1 -2,-2v-20a2,2 0 0 1 2,-2z" />
+        <path
+            android:fillColor="#B3FFFFFF"
+            android:pathData="M76,42h5a2,2 0 0 1 2,2v20a2,2 0 0 1 -2,2h-5a2,2 0 0 1 -2,-2v-20a2,2 0 0 1 2,-2z" />
+    </group>
+</vector>
