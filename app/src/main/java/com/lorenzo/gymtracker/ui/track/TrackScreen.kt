@@ -43,6 +43,14 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import com.lorenzo.gymtracker.domain.firstUnticked
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -100,6 +108,9 @@ fun TrackScreen(
     val lastTime by viewModel.lastTime.collectAsStateWithLifecycle()
     val rest by viewModel.rest.collectAsStateWithLifecycle()
     val running by viewModel.running.collectAsStateWithLifecycle()
+    val autoRunning by viewModel.autoRunning.collectAsStateWithLifecycle()
+    val autoStop by viewModel.autoStop.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
     val d = details ?: return
     val session = d.session
     val active = session.isActive
@@ -117,7 +128,42 @@ fun TrackScreen(
         onDispose { view.keepScreenOn = false }
     }
 
+    // Auto-run starts at the first unticked set, and only if that one is timed.
+    val next = firstUnticked(d)
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(autoStop) {
+        val stop = autoStop ?: return@LaunchedEffect
+        // Shown from its own coroutine: clearing the reason restarts this effect, which would cancel it.
+        viewModel.clearAutoStop()
+        scope.launch {
+            snackbarHostState.showSnackbar(
+                when (stop) {
+                    is WorkoutTimers.AutoStop.NotTimed -> "Auto-run paused: ${stop.exerciseName} is done by reps. Tick its sets, then Resume."
+                    WorkoutTimers.AutoStop.Finished -> "Auto-run done: every set is ticked."
+                },
+                duration = SnackbarDuration.Long,
+            )
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            if (active && autoRunning) {
+                ExtendedFloatingActionButton(
+                    onClick = viewModel::stopAuto,
+                    icon = { Icon(AppIcons.Stop, contentDescription = null) },
+                    text = { Text("Stop") },
+                )
+            } else if (active && next != null && next.canRun) {
+                ExtendedFloatingActionButton(
+                    onClick = viewModel::startAuto,
+                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                    // "Go" at the start; "Resume" once part of the workout is done.
+                    text = { Text(if (d.doneSets == 0) "Go" else "Resume") },
+                )
+            }
+        },
         topBar = {
             val totalSets = d.exercises.sumOf { it.sets.size }
             Column {
@@ -154,12 +200,15 @@ fun TrackScreen(
         },
         bottomBar = {
             val r = rest
-            if (active && r != null) RestBar(r, onAdjust = viewModel::adjustRest, onSkip = viewModel::skipRest)
+            if (active && r != null) {
+                RestBar(r, next = next?.exercise?.exercise?.name, onAdjust = viewModel::adjustRest, onSkip = viewModel::skipRest)
+            }
         },
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).imePadding(),
-            contentPadding = PaddingValues(16.dp),
+            // Room at the bottom for the Go button.
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (d.exercises.isEmpty()) {
@@ -489,14 +538,19 @@ private fun Countdown(endsAt: Long, totalSec: Int, modifier: Modifier) {
 
 /** Rest countdown above the navigation bar. */
 @Composable
-private fun RestBar(rest: WorkoutTimers.Rest, onAdjust: (Int) -> Unit, onSkip: () -> Unit) {
+private fun RestBar(rest: WorkoutTimers.Rest, next: String?, onAdjust: (Int) -> Unit, onSkip: () -> Unit) {
     val now = rememberNow(200)
     val left = ((rest.endsAt - now) / 1000.0).coerceAtLeast(0.0)
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shadowElevation = 4.dp) {
         Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Rest", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (next != null) "Rest · next: $next" else "Rest",
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(formatClock(ceil(left).toInt()), style = MaterialTheme.typography.headlineMedium)
                 }
                 TextButton(onClick = { onAdjust(-15) }) { Text("−15 s") }

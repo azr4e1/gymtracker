@@ -46,6 +46,18 @@ class TrackViewModel(
     val rest: StateFlow<WorkoutTimers.Rest?> = timers.rest
     val running: StateFlow<WorkoutTimers.RunningSet?> = timers.running
 
+    /** Auto-run is going through this workout's timed sets. */
+    val autoRunning: StateFlow<Boolean> = timers.autoSession.map { it == sessionId }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val autoStop: StateFlow<WorkoutTimers.AutoStop?> = timers.autoStop
+
+    fun startAuto() = timers.startAuto(sessionId)
+
+    fun stopAuto() = timers.stopAuto()
+
+    fun clearAutoStop() = timers.clearAutoStop()
+
     private val isActive get() = details.value?.session?.isActive == true
 
     /** [text] is in pounds when [inLb]; the weight is stored in kg either way. */
@@ -62,7 +74,8 @@ class TrackViewModel(
     fun toggleDone(exercise: SessionExerciseDetails, set: SessionSet) {
         val done = !set.done
         launch { sessions.setDone(set.id, done) }
-        if (done && isActive) timers.startRest(exercise.entry.restSec)
+        // Not while a timed set is counting down: its own rest follows it.
+        if (done && isActive && timers.running.value == null) timers.startRest(exercise.entry.restSec)
     }
 
     fun startSet(exercise: SessionExerciseDetails, set: SessionSet) =

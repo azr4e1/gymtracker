@@ -1,0 +1,1 @@
+Auto-run for timed exercises: press Go and the app runs each timed set, its rest and the next set on its own, pausing before exercises done by reps. Stop and Resume any time.

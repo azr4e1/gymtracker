@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.VibratorManager
+import com.lorenzo.gymtracker.domain.firstUnticked
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -18,6 +19,9 @@ import kotlinx.coroutines.launch
  * The rest countdown and the countdown of a timed set. App-wide, so they keep running when the
  * workout screen is closed. The last seconds tick, and a bell rings (and the phone buzzes) when
  * a countdown runs out. Times are epoch milliseconds.
+ *
+ * Auto-run goes through a workout's timed sets on its own: the first unticked set, its rest, the
+ * next one, and so on. It stops before a set done by reps, and when every set is ticked.
  */
 class WorkoutTimers(
     private val context: Context,
@@ -38,6 +42,22 @@ class WorkoutTimers(
     private val _running = MutableStateFlow<RunningSet?>(null)
     val running: StateFlow<RunningSet?> = _running.asStateFlow()
 
+    /** Why auto-run stopped on its own. */
+    sealed interface AutoStop {
+        /** The next set is done by reps: tick its sets, then resume. */
+        data class NotTimed(val exerciseName: String) : AutoStop
+
+        data object Finished : AutoStop
+    }
+
+    /** Id of the workout being auto-run, or null. */
+    private val _autoSession = MutableStateFlow<Long?>(null)
+    val autoSession: StateFlow<Long?> = _autoSession.asStateFlow()
+
+    /** Set when auto-run stops by itself, for the screen to explain; cleared with [clearAutoStop]. */
+    private val _autoStop = MutableStateFlow<AutoStop?>(null)
+    val autoStop: StateFlow<AutoStop?> = _autoStop.asStateFlow()
+
     private var restJob: Job? = null
     private var runningJob: Job? = null
 
@@ -57,7 +77,13 @@ class WorkoutTimers(
         if (endsAt <= System.currentTimeMillis()) skipRest() else scheduleRest(Rest(endsAt, (current.totalSec + seconds).coerceAtLeast(1)))
     }
 
+    /** Ends the rest now; during auto-run the next set starts. */
     fun skipRest() {
+        clearRest()
+        if (_autoSession.value != null) scope.launch { advance() }
+    }
+
+    private fun clearRest() {
         restJob?.cancel()
         _rest.value = null
     }
@@ -65,33 +91,79 @@ class WorkoutTimers(
     private fun scheduleRest(rest: Rest) {
         restJob?.cancel()
         _rest.value = rest
-        restJob = scope.launch { countDown(rest.endsAt) { _rest.value = null } }
+        restJob = scope.launch {
+            countDown(rest.endsAt) {
+                _rest.value = null
+                // Launched apart: starting the next set ends this rest's job.
+                if (_autoSession.value != null) scope.launch { advance() }
+            }
+        }
     }
 
     /** Starts the countdown of a timed set. Only one runs at a time. */
     fun startSet(setId: Long, plannedSec: Int, restSec: Int) {
         if (_running.value != null || plannedSec <= 0) return
-        skipRest()
+        clearRest()
         val set = RunningSet(setId, System.currentTimeMillis(), plannedSec, restSec)
         _running.value = set
-        runningJob = scope.launch { countDown(set.endsAt) { complete(set, plannedSec) } }
+        runningJob = scope.launch { countDown(set.endsAt) { scope.launch { complete(set, plannedSec) } } }
     }
 
-    /** Stops the running set early: it's ticked with the time actually done. */
+    /** Stops the running set early: it's ticked with the time actually done (auto-run carries on). */
     fun stopSet() {
         val set = _running.value ?: return
         runningJob?.cancel()
+        _running.value = null
         val elapsed = ((System.currentTimeMillis() - set.startedAt) / 1000).toInt().coerceIn(1, set.plannedSec)
-        complete(set, elapsed)
+        scope.launch { complete(set, elapsed) }
     }
 
-    private fun complete(set: RunningSet, seconds: Int) {
+    private suspend fun complete(set: RunningSet, seconds: Int) {
         _running.value = null
-        scope.launch {
-            sessions.setDuration(set.setId, seconds)
-            sessions.setDone(set.setId, true)
+        sessions.setDuration(set.setId, seconds)
+        sessions.setDone(set.setId, true)
+        val auto = _autoSession.value
+        // No rest after the last set of an auto-run: it's over.
+        val nothingLeft = auto != null && sessions.get(auto)?.let(::firstUnticked) == null
+        if (nothingLeft) advance() else if (set.restSec > 0) startRest(set.restSec) else if (auto != null) advance()
+    }
+
+    /** Starts auto-run of [sessionId] from its first unticked set, which must be timed. */
+    fun startAuto(sessionId: Long) {
+        _autoStop.value = null
+        _autoSession.value = sessionId
+        runningJob?.cancel()
+        _running.value = null
+        clearRest()
+        scope.launch { advance() }
+    }
+
+    /** Stops auto-run. A set in progress is abandoned, not ticked, so resuming starts it again. */
+    fun stopAuto() {
+        _autoSession.value = null
+        runningJob?.cancel()
+        _running.value = null
+        clearRest()
+    }
+
+    fun clearAutoStop() {
+        _autoStop.value = null
+    }
+
+    /** Auto-run: starts the first unticked set, or stops if it's done by reps or there's none. */
+    private suspend fun advance() {
+        val sessionId = _autoSession.value ?: return
+        val next = sessions.get(sessionId)?.let(::firstUnticked)
+        when {
+            next == null -> endAuto(AutoStop.Finished)
+            !next.canRun -> endAuto(AutoStop.NotTimed(next.exercise.exercise.name))
+            else -> startSet(next.set.id, next.set.durationSec ?: next.exercise.exercise.durationSec, next.exercise.entry.restSec)
         }
-        startRest(set.restSec)
+    }
+
+    private fun endAuto(reason: AutoStop) {
+        _autoSession.value = null
+        _autoStop.value = reason
     }
 
     /**
@@ -125,11 +197,10 @@ class WorkoutTimers(
         }
     }
 
-    /** Stops both countdowns without ticking anything, e.g. when the workout ends. */
+    /** Stops both countdowns and auto-run without ticking anything, e.g. when the workout ends. */
     fun cancelAll() {
-        runningJob?.cancel()
-        _running.value = null
-        skipRest()
+        stopAuto()
+        _autoStop.value = null
     }
 
     private companion object {
