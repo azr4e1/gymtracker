@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">GymTracker</string>
+    <string name="widget_quick_start_description">Start a workout or one of your routines; resume the one in progress</string>
+    <string name="widget_week_description">Workouts, sets and time this week, and recent weeks</string>
+    <string name="widget_muscles_description">Sets per muscle this week</string>
 </resources>

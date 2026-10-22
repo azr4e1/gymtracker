@@ -43,6 +43,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.scale
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberUpdatedState
+import com.lorenzo.gymtracker.data.repository.Countdown
+import com.lorenzo.gymtracker.data.repository.TimerState
+import com.lorenzo.gymtracker.domain.timerTitle
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -74,6 +83,7 @@ import com.lorenzo.gymtracker.data.db.SessionExerciseDetails
 import com.lorenzo.gymtracker.data.db.entity.SessionSet
 import com.lorenzo.gymtracker.data.repository.WorkoutTimers
 import com.lorenzo.gymtracker.ui.components.AppIcons
+import com.lorenzo.gymtracker.ui.components.AskNotificationPermissionOnce
 import com.lorenzo.gymtracker.ui.components.ConfirmDialog
 import com.lorenzo.gymtracker.ui.components.EmptyText
 import com.lorenzo.gymtracker.ui.components.NumberField
@@ -106,9 +116,7 @@ fun TrackScreen(
 ) {
     val details by viewModel.details.collectAsStateWithLifecycle()
     val lastTime by viewModel.lastTime.collectAsStateWithLifecycle()
-    val rest by viewModel.rest.collectAsStateWithLifecycle()
-    val running by viewModel.running.collectAsStateWithLifecycle()
-    val autoRunning by viewModel.autoRunning.collectAsStateWithLifecycle()
+    val timers by viewModel.timerState.collectAsStateWithLifecycle()
     val autoStop by viewModel.autoStop.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val d = details ?: return
@@ -121,6 +129,9 @@ fun TrackScreen(
     var editingRest by remember { mutableStateOf<SessionExerciseDetails?>(null) }
     var removing by remember { mutableStateOf<SessionExerciseDetails?>(null) }
 
+    // Timers show as a notification too; Android needs permission for it.
+    AskNotificationPermissionOnce(enabled = active)
+
     // The phone stays awake during a workout, so the timers stay in view.
     val view = LocalView.current
     DisposableEffect(active) {
@@ -130,6 +141,16 @@ fun TrackScreen(
 
     // Auto-run starts at the first unticked set, and only if that one is timed.
     val next = firstUnticked(d)
+    val current = timers.current
+
+    // When a set starts counting down (on its own or with ▶), its exercise scrolls into view.
+    val listState = rememberLazyListState()
+    val exercises by rememberUpdatedState(d.exercises)
+    LaunchedEffect(current?.setId) {
+        val setId = current?.setId ?: return@LaunchedEffect
+        val index = exercises.indexOfFirst { e -> e.sets.any { it.id == setId } }
+        if (index >= 0) listState.animateScrollToItem(index)
+    }
     val scope = rememberCoroutineScope()
     LaunchedEffect(autoStop) {
         val stop = autoStop ?: return@LaunchedEffect
@@ -149,13 +170,8 @@ fun TrackScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            if (active && autoRunning) {
-                ExtendedFloatingActionButton(
-                    onClick = viewModel::stopAuto,
-                    icon = { Icon(AppIcons.Stop, contentDescription = null) },
-                    text = { Text("Stop") },
-                )
-            } else if (active && next != null && next.canRun) {
+            // While a countdown is on, its controls are in the panel at the bottom.
+            if (active && current == null && next != null && next.canRun) {
                 ExtendedFloatingActionButton(
                     onClick = viewModel::startAuto,
                     icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
@@ -199,14 +215,24 @@ fun TrackScreen(
             }
         },
         bottomBar = {
-            val r = rest
-            if (active && r != null) {
-                RestBar(r, next = next?.exercise?.exercise?.name, onAdjust = viewModel::adjustRest, onSkip = viewModel::skipRest)
+            if (active && current != null) {
+                TimerPanel(
+                    countdown = current,
+                    auto = timers.auto,
+                    title = timerTitle(current, d),
+                    onPause = viewModel::pause,
+                    onResume = viewModel::resume,
+                    onFinishSet = viewModel::finishSet,
+                    onAdjustRest = viewModel::adjustRest,
+                    onSkipRest = viewModel::skipRest,
+                    onAutoChange = { on -> if (on) viewModel.startAuto() else viewModel.stopAuto() },
+                )
             }
         },
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).imePadding(),
+            state = listState,
             // Room at the bottom for the Go button.
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -224,7 +250,7 @@ fun TrackScreen(
                     exercise = e,
                     lastTime = lastTime[e.exercise.id],
                     active = active,
-                    running = running,
+                    timers = timers,
                     viewModel = viewModel,
                     menu = listOfNotNull(
                         "Rest time…" to { editingRest = e },
@@ -324,7 +350,7 @@ private fun ExerciseCard(
     exercise: SessionExerciseDetails,
     lastTime: LastTime?,
     active: Boolean,
-    running: WorkoutTimers.RunningSet?,
+    timers: TimerState,
     viewModel: TrackViewModel,
     menu: List<Pair<String, () -> Unit>>,
 ) {
@@ -356,7 +382,7 @@ private fun ExerciseCard(
                 HeaderRow(timed, weighted, inLb, onToggleUnit = { inLb = !inLb })
                 exercise.sets.forEachIndexed { i, set ->
                     if (timed) {
-                        TimedSetRow(i + 1, set, exercise, weighted, inLb, active, running, viewModel)
+                        TimedSetRow(i + 1, set, exercise, weighted, inLb, active, timers, viewModel)
                     } else {
                         RepsSetRow(i + 1, set, exercise, weighted, inLb, viewModel)
                     }
@@ -484,32 +510,60 @@ private fun TimedSetRow(
     weighted: Boolean,
     inLb: Boolean,
     active: Boolean,
-    running: WorkoutTimers.RunningSet?,
+    timers: TimerState,
     viewModel: TrackViewModel,
 ) {
+    val onScreen = timers.current?.takeIf { it.setId == set.id }
+    val pausedLeftMs = timers.pausedSets[set.id]
     SetRow {
         SetNumber(number)
         if (weighted) WeightField(set, inLb, viewModel, Modifier.weight(1f))
-        if (running?.setId == set.id) {
-            Countdown(running.endsAt, running.plannedSec, Modifier.weight(1f))
-            FilledTonalIconButton(onClick = viewModel::stopSet) { Icon(AppIcons.Stop, contentDescription = "Stop set") }
-        } else {
-            NumberField(
-                value = set.durationSec?.toString().orEmpty(),
-                onValueChange = { viewModel.setDuration(set, it) },
-                label = null,
-                placeholder = "–",
-                suffix = "s",
-                modifier = Modifier.weight(1f),
-            )
-            if (active && !set.done) {
-                FilledTonalIconButton(onClick = { viewModel.startSet(exercise, set) }, enabled = running == null) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = "Start set")
+        when {
+            // Counting down: the time and controls are in the panel at the bottom.
+            onScreen != null -> SetTimeLeft(onScreen, Modifier.weight(1f))
+            pausedLeftMs != null -> {
+                Text(
+                    "Paused · ${formatClock(ceil(pausedLeftMs / 1000.0).toInt())} left",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+                FilledTonalIconButton(onClick = { viewModel.startSet(exercise, set) }) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Resume set")
+                }
+            }
+            else -> {
+                NumberField(
+                    value = set.durationSec?.toString().orEmpty(),
+                    onValueChange = { viewModel.setDuration(set, it) },
+                    label = null,
+                    placeholder = "–",
+                    suffix = "s",
+                    modifier = Modifier.weight(1f),
+                )
+                if (active && !set.done) {
+                    // Starting this set pauses another one counting down.
+                    FilledTonalIconButton(onClick = { viewModel.startSet(exercise, set) }) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "Start set")
+                    }
                 }
             }
         }
         DoneToggle(set.done) { viewModel.toggleDone(exercise, set) }
     }
+}
+
+/** Marks the set on screen in its row; the panel at the bottom shows its countdown. */
+@Composable
+private fun SetTimeLeft(countdown: Countdown, modifier: Modifier) {
+    Text(
+        if (countdown.isPaused) "Paused" else "Running",
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.primary,
+        textAlign = TextAlign.Center,
+        modifier = modifier,
+    )
 }
 
 /** Edge-to-edge bar under the header: the share of the workout's sets ticked so far. */
@@ -525,41 +579,70 @@ private fun SetsProgress(done: Int, total: Int) {
     )
 }
 
-/** Time left in a running timed set, with a progress bar. */
+/**
+ * The countdown on screen, above the navigation bar: a timed set or a rest, running or paused.
+ * A set can be finished early; a rest lengthened, shortened or skipped.
+ */
 @Composable
-private fun Countdown(endsAt: Long, totalSec: Int, modifier: Modifier) {
+private fun TimerPanel(
+    countdown: Countdown,
+    auto: Boolean,
+    title: String,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onFinishSet: () -> Unit,
+    onAdjustRest: (Int) -> Unit,
+    onSkipRest: () -> Unit,
+    onAutoChange: (Boolean) -> Unit,
+) {
     val now = rememberNow(200)
-    val left = ((endsAt - now) / 1000.0).coerceAtLeast(0.0)
-    Column(modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(formatClock(ceil(left).toInt()), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        LinearProgressIndicator(progress = { (1 - left / totalSec).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-    }
-}
-
-/** Rest countdown above the navigation bar. */
-@Composable
-private fun RestBar(rest: WorkoutTimers.Rest, next: String?, onAdjust: (Int) -> Unit, onSkip: () -> Unit) {
-    val now = rememberNow(200)
-    val left = ((rest.endsAt - now) / 1000.0).coerceAtLeast(0.0)
-    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shadowElevation = 4.dp) {
-        Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    val leftMs = countdown.remainingMs(now)
+    val container = if (countdown.isRest) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
+    Surface(color = container, shadowElevation = 4.dp) {
+        Column(Modifier.navigationBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (next != null) "Rest · next: $next" else "Rest",
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(formatClock(ceil(left).toInt()), style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    title + if (countdown.isPaused) " · paused" else "",
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                // Auto-run on: the next set starts on its own after this one and its rest.
+                Row(
+                    Modifier.toggleable(value = auto, role = Role.Switch, onValueChange = onAutoChange).padding(start = 8.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Auto-run", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 6.dp))
+                    Switch(checked = auto, onCheckedChange = null, modifier = Modifier.scale(0.7f))
                 }
-                TextButton(onClick = { onAdjust(-15) }) { Text("−15 s") }
-                TextButton(onClick = { onAdjust(15) }) { Text("+15 s") }
-                TextButton(onClick = onSkip) { Text("Skip") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    formatClock(ceil(leftMs / 1000.0).toInt()),
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (countdown.isRest) {
+                    TextButton(onClick = { onAdjustRest(-15) }) { Text("−15") }
+                    TextButton(onClick = { onAdjustRest(15) }) { Text("+15") }
+                }
+                if (countdown.isPaused) {
+                    FilledTonalIconButton(onClick = onResume) { Icon(Icons.Filled.PlayArrow, contentDescription = "Resume") }
+                } else {
+                    FilledTonalIconButton(onClick = onPause) { Icon(AppIcons.Pause, contentDescription = "Pause") }
+                }
+                if (countdown.isRest) {
+                    TextButton(onClick = onSkipRest) { Text("Skip") }
+                } else {
+                    // Ends the set now and ticks it with the time done.
+                    TextButton(onClick = onFinishSet) { Text("Done") }
+                }
             }
             LinearProgressIndicator(
-                progress = { (left / rest.totalSec).toFloat().coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                // Empties as the time runs out.
+                progress = { (leftMs.toFloat() / countdown.totalMs).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().padding(end = 8.dp, bottom = 4.dp),
             )
         }
     }

@@ -21,8 +21,8 @@ android {
         applicationId = "com.lorenzo.gymtracker"
         minSdk = 31
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     signingConfigs {
@@ -46,6 +46,15 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
+        }
+        // Shrunk like release but debug-signed, installed next to it: for finding release-only bugs.
+        create("staging") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".staging"
+            signingConfig = signingConfigs.getByName("debug")
+            // Lets tests look into its database; the code is still shrunk and optimized like release.
+            isDebuggable = true
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -89,6 +98,8 @@ dependencies {
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.fastexcel)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
 
     testImplementation(libs.junit)
 }

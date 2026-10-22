@@ -54,9 +54,18 @@ private enum class Tab(val route: Any, val routeClass: KClass<*>, val label: Str
 private const val PICKED_EXERCISES = "pickedExercises"
 private const val CREATED_EXERCISE = "createdExercise"
 
+/** [openWorkout], when set, is a workout to show right away (from the notification or a widget). */
 @Composable
-fun GymTrackerNavHost() {
+fun GymTrackerNavHost(openWorkout: Long? = null, onWorkoutOpened: () -> Unit = {}) {
     val navController = rememberNavController()
+    LaunchedEffect(openWorkout) {
+        val id = openWorkout ?: return@LaunchedEffect
+        // Already on that workout: nothing to do.
+        if (navController.currentBackStackEntry?.destination?.hasRoute(TrackRoute::class) != true) {
+            navController.navigate(TrackRoute(id))
+        }
+        onWorkoutOpened()
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
     val currentTab = Tab.entries.firstOrNull { tab -> destination?.hasRoute(tab.routeClass) == true }

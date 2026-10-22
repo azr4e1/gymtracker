@@ -45,14 +45,17 @@ abstract class SessionDao {
     @Query("SELECT * FROM sessions WHERE endedAt IS NOT NULL ORDER BY startedAt DESC")
     abstract fun observeFinished(): Flow<List<SessionDetails>>
 
-    /** Every ticked set, oldest workout first. */
+    /**
+     * Every ticked set of finished workouts, oldest workout first. The workout in progress only
+     * counts once it's finished, so a discarded one never shows in progress and stats.
+     */
     @Query(
         """
         SELECT s.id AS sessionId, s.startedAt, se.exerciseId, se.timed, st.reps, st.weightKg, st.durationSec
         FROM session_sets st
         JOIN session_exercises se ON st.sessionExerciseId = se.id
         JOIN sessions s ON se.sessionId = s.id
-        WHERE st.done = 1
+        WHERE st.done = 1 AND s.endedAt IS NOT NULL
         ORDER BY s.startedAt, se.position, st.position
         """,
     )

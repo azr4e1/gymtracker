@@ -52,6 +52,8 @@ object AppIcons {
 
     val Stop: ImageVector by lazy { icon("Stop", fills = listOf("M7,7h10v10H7z")) }
 
+    val Pause: ImageVector by lazy { icon("Pause", fills = listOf("M6,5h4v14H6z", "M14,5h4v14h-4z")) }
+
     val ArrowUp: ImageVector by lazy { icon("ArrowUp", "M12,19V5", "M5,12l7,-7 7,7") }
 
     val ArrowDown: ImageVector by lazy { icon("ArrowDown", "M12,5v14", "M19,12l-7,7 -7,-7") }

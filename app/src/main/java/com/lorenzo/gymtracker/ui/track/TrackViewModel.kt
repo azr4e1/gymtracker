@@ -6,6 +6,7 @@ import com.lorenzo.gymtracker.data.db.SessionDetails
 import com.lorenzo.gymtracker.data.db.SessionExerciseDetails
 import com.lorenzo.gymtracker.data.db.entity.SessionSet
 import com.lorenzo.gymtracker.data.repository.SessionRepository
+import com.lorenzo.gymtracker.data.repository.TimerState
 import com.lorenzo.gymtracker.data.repository.WorkoutTimers
 import com.lorenzo.gymtracker.ui.appViewModelFactory
 import com.lorenzo.gymtracker.ui.lbToKg
@@ -43,18 +44,19 @@ class TrackViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    val rest: StateFlow<WorkoutTimers.Rest?> = timers.rest
-    val running: StateFlow<WorkoutTimers.RunningSet?> = timers.running
-
-    /** Auto-run is going through this workout's timed sets. */
-    val autoRunning: StateFlow<Boolean> = timers.autoSession.map { it == sessionId }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    /** The timers, if they belong to this workout. */
+    val timerState: StateFlow<TimerState> = timers.state.map { if (it.sessionId == sessionId) it else TimerState() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimerState())
 
     val autoStop: StateFlow<WorkoutTimers.AutoStop?> = timers.autoStop
 
     fun startAuto() = timers.startAuto(sessionId)
 
     fun stopAuto() = timers.stopAuto()
+
+    fun pause() = timers.pause()
+
+    fun resume() = timers.resume()
 
     fun clearAutoStop() = timers.clearAutoStop()
 
@@ -71,17 +73,24 @@ class TrackViewModel(
     fun setDuration(set: SessionSet, text: String) = launch { sessions.setDuration(set.id, text.toIntOrNull()) }
 
     /** Ticking a set during a workout starts the exercise's rest. */
+    /** Ticking a set during a workout starts the exercise's rest; ticking the timed set on screen finishes it early. */
     fun toggleDone(exercise: SessionExerciseDetails, set: SessionSet) {
         val done = !set.done
+        if (done && timers.state.value.current?.setId == set.id) {
+            timers.finishSet()
+            return
+        }
+        timers.forgetSet(set.id)
         launch { sessions.setDone(set.id, done) }
-        // Not while a timed set is counting down: its own rest follows it.
-        if (done && isActive && timers.running.value == null) timers.startRest(exercise.entry.restSec)
+        if (done && isActive) timers.startRest(sessionId, exercise.entry.restSec)
     }
 
+    /** Starts the set's countdown, or resumes it if it was paused. */
     fun startSet(exercise: SessionExerciseDetails, set: SessionSet) =
-        timers.startSet(set.id, set.durationSec ?: exercise.exercise.durationSec, exercise.entry.restSec)
+        timers.startSet(sessionId, set.id, set.durationSec ?: exercise.exercise.durationSec, exercise.entry.restSec)
 
-    fun stopSet() = timers.stopSet()
+    /** Ends the timed set on screen now, ticking it with the time done. */
+    fun finishSet() = timers.finishSet()
 
     fun adjustRest(seconds: Int) = timers.adjustRest(seconds)
 
@@ -89,7 +98,10 @@ class TrackViewModel(
 
     fun addSet(exercise: SessionExerciseDetails) = launch { sessions.addSet(exercise.entry, exercise.exercise) }
 
-    fun removeSet(set: SessionSet) = launch { sessions.deleteSet(set.id) }
+    fun removeSet(set: SessionSet) {
+        timers.forgetSet(set.id)
+        launch { sessions.deleteSet(set.id) }
+    }
 
     fun setRest(exercise: SessionExerciseDetails, seconds: Int) = launch { sessions.setRest(exercise.entry.id, seconds) }
 
@@ -97,7 +109,10 @@ class TrackViewModel(
 
     fun move(exercise: SessionExerciseDetails, by: Int) = launch { sessions.move(sessionId, exercise.entry.id, by) }
 
-    fun removeExercise(exercise: SessionExerciseDetails) = launch { sessions.removeExercise(exercise.entry) }
+    fun removeExercise(exercise: SessionExerciseDetails) {
+        exercise.sets.forEach { timers.forgetSet(it.id) }
+        launch { sessions.removeExercise(exercise.entry) }
+    }
 
     fun addExercises(ids: List<Long>) = launch { sessions.addExercises(sessionId, ids) }
 

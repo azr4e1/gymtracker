@@ -11,6 +11,7 @@ room = "2.8.5"
 kotlinxSerialization = "1.11.0"
 junit = "4.13.2"
 fastexcel = "0.20.2"
+glance = "1.2.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -29,6 +30,8 @@ androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = 
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 fastexcel = { group = "org.dhatim", name = "fastexcel", version.ref = "fastexcel" }
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
+androidx-glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glance" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
