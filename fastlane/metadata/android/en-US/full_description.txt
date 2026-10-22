@@ -4,10 +4,13 @@
 <li>Start from a routine or an empty workout, and add exercises on the fly</li>
 <li>Each exercise is done by reps or for a time, with or without weight</li>
 <li>Edit weights, reps and times freely as you go; tick a set when it's done</li>
-<li>Rest timer starts on its own, with a countdown tick and a boxing bell at the end; timed sets have their own countdown</li>
+<li>Rest timer starts on its own, with a countdown tick and a boxing bell at the end; timed sets have their own countdown. Pause and resume from the exact second</li>
+<li>Auto-run: press Go and the timed sets, their rests and the next sets run on their own; switch it off any time</li>
+<li>A notification with a progress bar and buttons follows the timer outside the app</li>
 <li>See what you did last time; weights are pre-filled from it</li>
 <li>Type weights in kg or lb: they're converted for you</li>
 </ul>
 <p><b>Routines and exercises</b>: comes with about 60 common exercises; add your own with the muscles they work.</p>
 <p><b>Progress</b>: a chart per exercise (estimated one-rep max, heaviest weight, volume, reps or time), personal records, workouts per week or month, and sets per muscle each week. Drag the charts to look further back.</p>
+<p><b>Widgets</b>: quick start, this week, and sets per muscle this week.</p>
 <p><b>Your data</b>: JSON backup and restore to move to a new phone, export to Excel (.xlsx) for your own analysis. No account, no ads, no tracking.</p>
