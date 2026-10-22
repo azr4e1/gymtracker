@@ -440,11 +440,17 @@ private fun UnitToggle(inLb: Boolean, onToggle: () -> Unit) {
     }
 }
 
-/** A set's row. Only its tick shows whether it's done. */
+/**
+ * A set's row. Only its tick shows whether it's done; [onTimer] tints the set the timer is on
+ * (running or paused), so it's easy to spot.
+ */
 @Composable
-private fun SetRow(content: @Composable RowScope.() -> Unit) {
+private fun SetRow(onTimer: Boolean = false, content: @Composable RowScope.() -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        Modifier
+            .fillMaxWidth()
+            .background(if (onTimer) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, MaterialTheme.shapes.medium)
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         content = content,
@@ -515,7 +521,7 @@ private fun TimedSetRow(
 ) {
     val onScreen = timers.current?.takeIf { it.setId == set.id }
     val pausedLeftMs = timers.pausedSets[set.id]
-    SetRow {
+    SetRow(onTimer = onScreen != null) {
         SetNumber(number)
         if (weighted) WeightField(set, inLb, viewModel, Modifier.weight(1f))
         when {
